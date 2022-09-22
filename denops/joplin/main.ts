@@ -1,76 +1,145 @@
 import { 
     Denops,
     vars,
-    heper,
+    helper,
+    batch,
+    fn,
+    bufname,
     japi,
 } from "./deps.ts";
 
+interface KeyMap {
+    [name: string]: string[];
+}
+
 export async function main(denops: Denops): Promise<void> {
-  const token = await vars.g.get(denops, "joplin_token", "");
-  const port = await vars.g.get(denops, "joplin_port", 41184);
-
-  let config = new japi.ApiClient();
-  config.token = token;
-  config.port = port;
-
   // API
-  denops.dispatcher = {
-      async winOpen(): Promise<unknown> {
-          console.log(`${token}, ${port}`);
+    denops.dispatcher = {
+        async registerKeymap() {
+            const keymap: KeyMap = {};
+            keymap['openItem'] = ['<CR>', '<2-LeftMouse>'];
+            for (const action in keymap) {
+                const keys = keymap[action];
+                for (const key of keys) {
+                    await helper.execute(
+                        denops,
+                        `nnoremap <silent> <buffer> ${key} :call denops#request('${denops.name}', '${action}', [])<CR>`
+                    );
+                }
+            }
+        },
 
-          const items = await japi.noteApi.list();
-          await denops.cmd('enew');
-          await denops.call('setline', 1, items);
-      },
+        async openItem(): Promise<void> {
+            const bufnr = await fn.bufnr(denops, '%', false);
+            const line = await fn.line(denops, '.');
 
-      async winClose(): Promise<unknown> {
-          console.log('called winClose, this feature is under construction.');
-      },
+            const qflist = await fn.getqflist(denops);
+            await denops.cmd(opener || "new");
 
-      async toggle(): Promise<unknown> {
-          console.log('called toggle, this feature is under construction.');
-      },
+            const noteRes = await api.noteApi.get(qflist[line -1].module, ['id', 'title', 'body']);
 
-      async search(text: unknown): Promise<unknown> {
-          console.log('called search, this feature is under construction.');
-      },
+            await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
+        },
 
-      async saves(): Promise<unknown> {
-          console.log('called save, this feature is under construction.');
-      },
+        async winOpen(): Promise<void> {
+            await batch.batch(denops, async (denops) => {
+                await fn.setqflist(denops, [], "r");
+                await fn.setqflist(denops, [], "a", {
+                    title: `Joplin Note List`,
+                    context: 'JoplinWinOpen',
+                });
+                await denops.cmd("botright copen");
+            });
 
-      async savesTodo(): Promise<unknown> {
-          console.log('called saveTodo, this feature is under construction.');
-      },
+            const res = await api.noteApi.list();
+            // let text = "";
+            for(let i=0; i < res.items.length; i++) {
+                const title = res.items[i].title;
+                const id = res.items[i].id;
+                await fn.setqflist(denops, [], "a", 
+                                   {
+                                       context: 'JoplinSearch',
+                                       efm: "%o#%m",
+                                       lines: [id + '#' + title],
+                                   });
+            }
+            // await denops.call("setline", 1, text.split(/\n/));
+        },
 
-      async savesNote(): Promise<unknown> {
-          console.log('called saveNote, this feature is under construction.');
-      },
-  };
+        async winClose(): Promise<void> {
+            console.log('called winClose, this feature is under construction.');
+        },
 
-  // define Commands
-  await helper.execute(
-      denops,
-      `command! -nargs=0 JoplinWinOpen call denops#request('${denops.name}', 'winOpen', [])`,
-  );
-  await helper.execute(
-      denops,
-      `command! -nargs=0 JoplinWinClose call denops#request('${denops.name}', 'winClose', [])`,
-  );
-  await helper.execute(
-      denops,
-      `command! -nargs=0 JoplinToggle call denops#request('${denops.name}', 'toggle', [])`,
-  );
-  await helper.execute(
-      denops,
-      `command! -nargs=1 -complete=custom JoplinSaveAsTodo call denops#request('${denops.name}', 'saveTodo', [<q-args>])`,
-  );
-  await helper.execute(
-      denops,
-      `command! -nargs=1 -complete=custom JoplinSaveAsNote call denops#request('${denops.name}', 'saveNote', [<q-args>])`,
-  );
-  await helper.execute(
-      denops,
-      `command! -nargs=1 JoplinSearch echomsg denops#request('${denops.name}', 'search', [<q-args>])`,
-  );
-};
+        async toggle(): Promise<void> {
+            console.log('called toggle, this feature is under construction.');
+        },
+
+        async search(text: unknown): Promise<void> {
+            console.log('called search, this feature is under construction.');
+        },
+
+        async saves(): Promise<unknown> {
+            console.log('called save, this feature is under construction.');
+        },
+
+        async savesTodo(): Promise<unknown> {
+            console.log('called saveTodo, this feature is under construction.');
+        },
+
+        async savesNote(): Promise<unknown> {
+            console.log('called saveNote, this feature is under construction.');
+        },
+    };
+
+    // define Commands
+    await helper.execute(
+        denops,
+        `command! -nargs=0 JoplinWinOpen call denops#request('${denops.name}', 'winOpen', [])`,
+    );
+
+    await helper.execute(
+        denops,
+        `command! -nargs=0 JoplinWinClose call denops#request('${denops.name}', 'winClose', [])`,
+    );
+
+    await helper.execute(
+        denops,
+        `command! -nargs=0 JoplinToggle call denops#request('${denops.name}', 'toggle', [])`,
+    );
+    await helper.execute(
+        denops,
+        `command! -nargs=1 JoplinSaveAsTodo call denops#request('${denops.name}', 'saveTodo', [<q-args>])`,
+    );
+    await helper.execute(
+        denops,
+        `command! -nargs=1 JoplinSaveAsNote call denops#request('${denops.name}', 'saveNote', [<q-args>])`,
+    );
+    await helper.execute(
+        denops,
+        `command! -nargs=1 JoplinSearch echomsg denops#request('${denops.name}', 'search', [<q-args>])`,
+    );
+
+    const token = await vars.g.get(denops, "joplin_token", "");
+
+    if (token == null) {
+        console.log('joplin needs g:joplin_token');
+        return;
+    }
+
+    const api = new japi.JoplinApiGenerator();
+    api.token = token
+    if(!await api.joplinApi.ping()) {
+        console.log('no valid joplin app token. fix g:joplin_token');
+        return;
+    }
+
+    const opener = await vars.g.get(denops, "joplin_opener", "")
+
+    await helper.execute(
+        denops,
+        `augroup JoplinQFEnterAutoCmds
+            autocmd!
+            autocmd FileType qf call denops#request('${denops.name}', 'registerKeymap', [])
+        augroup END`
+    );
+}
