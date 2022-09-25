@@ -39,6 +39,11 @@ export async function main(denops: Denops): Promise<void> {
             const noteRes = await api.noteApi.get(qflist[line -1].module, ['id', 'title', 'body']);
 
             await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
+            await helper.execute(denops, `
+                setlocal bufhidden=hide
+                setlocal nomodified
+                setlocal nobackup noswapfile
+                `);
         },
 
         async winOpen(): Promise<void> {
