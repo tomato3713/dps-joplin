@@ -21,3 +21,12 @@ let g:joplin_opener = "vsplit"
 
 Open the notes list in the QuickFix window. Press Enter to open the note at the current cursor line. 
 
+## Options
+
+```
+" debug on
+let g:joplin_debug = true
+
+" item opener
+let g:joplin_opener = "vsplit"
+```
