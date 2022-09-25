@@ -62,19 +62,25 @@ export async function main(denops: Denops): Promise<void> {
                 await denops.cmd("botright copen");
             });
 
-            const res = await api.noteApi.list();
-            // let text = "";
-            for(let i=0; i < res.items.length; i++) {
-                const title = res.items[i].title;
-                const id = res.items[i].id;
-                await fn.setqflist(denops, [], "a", 
-                                   {
-                                       context: 'JoplinSearch',
-                                       efm: "%o#%m",
-                                       lines: [id + '#' + title],
-                                   });
+            for(let pageIdx = 0,  more = true; more; pageIdx++) {
+                const res = await api.noteApi.list(
+                    {
+                        page: pageIdx,
+                    }
+                );
+                // let text = "";
+                for(let i=0; i < res.items.length; i++) {
+                    const title = res.items[i].title;
+                    const id = res.items[i].id;
+                    await fn.setqflist(denops, [], "a",
+                                       {
+                                           context: 'JoplinSearch',
+                                           efm: "%o#%m",
+                                           lines: [id + '#' + title],
+                                       });
+                }
+                more = res.has_more;
             }
-            // await denops.call("setline", 1, text.split(/\n/));
         },
 
         async winClose(): Promise<void> {
