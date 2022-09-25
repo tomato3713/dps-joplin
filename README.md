@@ -20,6 +20,7 @@ let g:joplin_opener = "vsplit"
 ### `:JoplinWinOpen`
 
 Open the notes list in the QuickFix window. Press Enter to open the note at the current cursor line. 
+For saving changes, you use `:w` command.
 
 ## Options
 
