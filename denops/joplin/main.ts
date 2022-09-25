@@ -13,6 +13,11 @@ interface KeyMap {
 }
 
 export async function main(denops: Denops): Promise<void> {
+    const debug: boolean = await vars.g.get(denops, "joplin_debug", false);
+    const consoleLog = (...data: any[]): void => {
+        debug && console.log(...data);
+    };
+
   // API
     denops.dispatcher = {
         async registerKeymap() {
@@ -25,6 +30,7 @@ export async function main(denops: Denops): Promise<void> {
                         denops,
                         `nnoremap <silent> <buffer> ${key} :call denops#request('${denops.name}', '${action}', [])<CR>`
                     );
+                    consoleLog(`registered nnoremap, key: ${key}, action: ${action}`);
                 }
             }
         },
@@ -37,8 +43,8 @@ export async function main(denops: Denops): Promise<void> {
             await denops.cmd(opener || "new");
 
             const noteRes = await api.noteApi.get(qflist[line -1].module, ['id', 'title', 'body']);
-
             await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
+
             await helper.execute(denops, `
                 setlocal bufhidden=hide
                 setlocal nomodified
@@ -50,7 +56,7 @@ export async function main(denops: Denops): Promise<void> {
             await batch.batch(denops, async (denops) => {
                 await fn.setqflist(denops, [], "r");
                 await fn.setqflist(denops, [], "a", {
-                    title: `Joplin Note List`,
+                    title: 'Joplin Note List',
                     context: 'JoplinWinOpen',
                 });
                 await denops.cmd("botright copen");
@@ -141,10 +147,12 @@ export async function main(denops: Denops): Promise<void> {
     const opener = await vars.g.get(denops, "joplin_opener", "")
 
     await helper.execute(
-        denops,
-        `augroup JoplinQFEnterAutoCmds
+        denops, `
+        augroup JoplinQFEnterAutoCmds
             autocmd!
             autocmd FileType qf call denops#request('${denops.name}', 'registerKeymap', [])
-        augroup END`
+        augroup END
+        `
     );
 }
+
