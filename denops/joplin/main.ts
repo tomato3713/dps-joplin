@@ -8,15 +8,61 @@ import {
     bufname,
     japi,
 } from "./deps.ts";
+import { ensureString } from "https://deno.land/x/unknownutil@v1.0.0/mod.ts";
 
 interface KeyMap {
     [name: string]: string[];
 }
 
 export async function main(denops: Denops): Promise<void> {
-    const debug: boolean = await vars.g.get(denops, "joplin_debug", false);
-    const consoleLog = (...data: any[]): void => {
+    const debug: boolean = await vars.g.get(denops, "joplin_debug", false) as boolean;
+    const consoleLog = (...data: unknown[]): void => {
         debug && console.log(...data);
+    };
+
+    const createItem = async (title: string, parent_id: string, is_todo: boolean): Promise<unknown> => {
+        const res = await api.noteApi.create({
+            title: title,
+            parent_id: parent_id,
+            is_todo: is_todo,
+            body: `# ${title}`
+        });
+
+        consoleLog(res);
+        return res;
+    };
+
+    const openItemById = async (noteId: string): Promise<void> => {
+        const noteRes: japi.NoteGetRes = await api.noteApi.get(noteId, [
+            'id',
+            'title',
+            'body',
+            'parent_id',
+        ]);
+        consoleLog(noteRes);
+
+        await denops.cmd(opener || `new ${noteRes.title}`);
+        await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
+
+        await vars.b.set(denops, "joplin_note_id", noteRes.id);
+        await vars.b.set(denops, "joplin_note_title", noteRes.title);
+        await helper.execute(denops, `
+            setlocal bufhidden=hide
+            setlocal nomodified
+            setlocal nobackup noswapfile
+            setlocal filetype=markdown
+            `);
+        await autocmd.group(denops,
+                            "joplin",
+                            (helper: autocmd.GroupHelper) => {
+                                helper.define(
+                                    "BufWriteCmd" as autocmd.AutocmdEvent,
+                                    "<buffer>",
+                                    `
+                                    call denops#request('${denops.name}', 'update', [])
+                                    `
+                                );
+                            });
     };
 
   // API
@@ -38,32 +84,8 @@ export async function main(denops: Denops): Promise<void> {
 
         async openItem(): Promise<void> {
             const line = await fn.line(denops, '.');
-
             const qflist = await fn.getqflist(denops);
-            const noteRes: japi.NoteGetRes = await api.noteApi.get(qflist[line -1].module, ['id', 'title', 'body']);
-
-            await denops.cmd(opener || `new ${noteRes.title}`);
-            await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
-
-            await vars.b.set(denops, "joplin_note_id", noteRes.id);
-            await vars.b.set(denops, "joplin_note_title", noteRes.title);
-            await helper.execute(denops, `
-                setlocal bufhidden=hide
-                setlocal nomodified
-                setlocal nobackup noswapfile
-                setlocal filetype=markdown
-                `);
-            await autocmd.group(denops,
-                                "joplin",
-                                (helper: autocmd.GroupHelper) => {
-                                    helper.define(
-                                        "BufWriteCmd" as autocmd.AutocmdEvent,
-                                        "<buffer>",
-                                        `
-                                        call denops#request('${denops.name}', 'update', [])
-                                        `
-                                    );
-                                });
+            openItemById(qflist[line -1].module as string);
         },
 
         async winOpen(): Promise<void> {
@@ -106,10 +128,6 @@ export async function main(denops: Denops): Promise<void> {
                 `);
         },
 
-        async toggle(): Promise<void> {
-            console.log('called toggle, this feature is under construction.');
-        },
-
         async search(text: unknown): Promise<void> {
             console.log('called search, this feature is under construction.');
         },
@@ -132,16 +150,20 @@ export async function main(denops: Denops): Promise<void> {
                 `);
         },
 
-        async saves(): Promise<unknown> {
-            console.log('called save, this feature is under construction.');
+        async newTodo(title: unknown, parent_id: unknown = ''): Promise<void> {
+            ensureString(title);
+            ensureString(parent_id);
+
+            const res = await createItem(title as string, parent_id as string, true);
+            openItemById(res.id as string);
         },
 
-        async savesTodo(): Promise<unknown> {
-            console.log('called saveTodo, this feature is under construction.');
-        },
+        async newNote(title: unknown, parent_id: unknown = ''): Promise<void> {
+            ensureString(title);
+            ensureString(parent_id);
 
-        async savesNote(): Promise<unknown> {
-            console.log('called saveNote, this feature is under construction.');
+            const res = await createItem(title as string, parent_id as string, false);
+            openItemById(res.id as string);
         },
     };
 
@@ -150,14 +172,13 @@ export async function main(denops: Denops): Promise<void> {
         denops, `
         command! -nargs=0 JoplinWinOpen call denops#request('${denops.name}', 'winOpen', [])
         command! -nargs=0 JoplinWinClose call denops#request('${denops.name}', 'winClose', [])
-        command! -nargs=0 JoplinToggle call denops#request('${denops.name}', 'toggle', [])
-        command! -nargs=1 JoplinSaveAsTodo call denops#request('${denops.name}', 'saveTodo', [<q-args>])
-        command! -nargs=1 JoplinSaveAsNote call denops#request('${denops.name}', 'saveNote', [<q-args>])
+        command! -nargs=1 JoplinNewTodo call denops#request('${denops.name}', 'newTodo', [<q-args>])
+        command! -nargs=1 JoplinNewNote call denops#request('${denops.name}', 'newNote', [<q-args>])
         command! -nargs=1 JoplinSearch echomsg denops#request('${denops.name}', 'search', [<q-args>])
         `,
     );
 
-    const token = await vars.g.get(denops, "joplin_token", "");
+    const token = await vars.g.get(denops, "joplin_token", "") as string;
 
     if (token == null) {
         console.log('joplin needs g:joplin_token');
@@ -171,7 +192,7 @@ export async function main(denops: Denops): Promise<void> {
         return;
     }
 
-    const opener = await vars.g.get(denops, "joplin_opener", "")
+    const opener = await vars.g.get(denops, "joplin_opener", "") as string
 
     await helper.execute(
         denops, `
