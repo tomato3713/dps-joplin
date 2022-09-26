@@ -71,7 +71,7 @@ export async function main(denops: Denops): Promise<void> {
                 await fn.setqflist(denops, [], "r");
                 await fn.setqflist(denops, [], "a", {
                     title: 'Joplin Note List',
-                    context: 'JoplinWinOpen',
+                    context: 'joplin',
                 });
                 await denops.cmd("botright copen");
             });
@@ -87,7 +87,7 @@ export async function main(denops: Denops): Promise<void> {
                     const id = res.items[i].id;
                     await fn.setqflist(denops, [], "a",
                                        {
-                                           context: 'JoplinSearch',
+                                           context: 'joplin',
                                            efm: "%o#%m",
                                            lines: [id + '#' + title],
                                        });
@@ -97,7 +97,13 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async winClose(): Promise<void> {
-            console.log('called winClose, this feature is under construction.');
+            await fn.setqflist(denops, [], "r",
+                               {
+                                   context: 'joplin'
+                               });
+            await helper.execute(denops, `
+                cclose
+                `);
         },
 
         async toggle(): Promise<void> {
