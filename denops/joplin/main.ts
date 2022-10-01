@@ -1,4 +1,4 @@
-import { 
+import {
     Denops,
     vars,
     helper,
@@ -128,6 +128,33 @@ export async function main(denops: Denops): Promise<void> {
                 `);
         },
 
+        async openNotebook(): Promise<void> {
+            let content = 'JoplinNoteBooks Explorer\n'
+
+            const res = await api.folderApi.listAll();
+            consoleLog(res);
+
+            for (const item of res) {
+                content += "- " + item.title + ":" + item.id + "\n";
+                if(item.children != undefined) {
+                    for (const child of item.children) {
+                        content += "  - " + child.title + ":" + child.id as string + "\n";
+                    }
+                }
+            }
+
+            await denops.cmd("new");
+            await denops.call("setline", 1, content.split(/\r?\n/g))
+            await helper.execute(denops, `
+                setlocal bufhidden=unload nobuflisted
+                setlocal modifiable
+                setlocal nobackup noswapfile
+                setlocal filetype=joplin
+                setlocal buftype=nofile
+                setlocal nowrap cursorline
+                `);
+        },
+
         async search(text: unknown): Promise<void> {
             console.log('called search, this feature is under construction.');
         },
@@ -170,11 +197,12 @@ export async function main(denops: Denops): Promise<void> {
     // define Commands
     await helper.execute(
         denops, `
-        command! -nargs=0 JoplinWinOpen call denops#request('${denops.name}', 'winOpen', [])
-        command! -nargs=0 JoplinWinClose call denops#request('${denops.name}', 'winClose', [])
-        command! -nargs=1 JoplinNewTodo call denops#request('${denops.name}', 'newTodo', [<q-args>])
-        command! -nargs=1 JoplinNewNote call denops#request('${denops.name}', 'newNote', [<q-args>])
-        command! -nargs=1 JoplinSearch echomsg denops#request('${denops.name}', 'search', [<q-args>])
+        command! -nargs=0 JoplinWinOpen      call denops#request('${denops.name}',      'winOpen', [])
+        command! -nargs=0 JoplinWinClose     call denops#request('${denops.name}',     'winClose', [])
+        command! -nargs=0 JoplinOpenNotebook call denops#request('${denops.name}', 'openNotebook', [])
+        command! -nargs=1 JoplinNewTodo      call denops#request('${denops.name}',      'newTodo', [<q-args>])
+        command! -nargs=1 JoplinNewNote      call denops#request('${denops.name}',      'newNote', [<q-args>])
+        command! -nargs=1 JoplinSearch       call denops#request('${denops.name}',       'search', [<q-args>])
         `,
     );
 
