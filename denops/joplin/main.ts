@@ -7,11 +7,15 @@ import {
     autocmd,
     bufname,
     japi,
+    unknownutil,
 } from "./deps.ts";
-import { ensureString } from "https://deno.land/x/unknownutil@v1.0.0/mod.ts";
 
 interface KeyMap {
     [name: string]: string[];
+}
+
+interface IProp {
+    [name: string]: string | boolean;
 }
 
 export async function main(denops: Denops): Promise<void> {
@@ -65,6 +69,25 @@ export async function main(denops: Denops): Promise<void> {
                             });
     };
 
+    const res2Text = (res: Array<any>, indent: string): string => {
+        if( res == undefined ) return "";
+
+        let str = "";
+        for(const item of res) {
+            const prop = {
+                [ "title" ]: item.title,
+                [ "id" ]: item.id,
+                [ "is_notebook" ]: true,
+                [ "is_todo" ]: false,
+            };
+            props.push(prop);
+            str += indent + item.title + "\n";
+            str += res2Text(item.children, indent + "  ");
+        }
+
+        return str;
+    };
+
   // API
     denops.dispatcher = {
         async registerKeymap() {
@@ -83,9 +106,21 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async openItem(): Promise<void> {
-            const line = await fn.line(denops, '.');
-            const qflist = await fn.getqflist(denops);
-            openItemById(qflist[line -1].module as string);
+            const ft = await vars.localOptions.get(denops, "filetype")
+
+            consoleLog(ft as string);
+
+            let noteId = ""
+            if(ft == "joplin") {
+                const text = await fn.getline(denops, '.');
+                consoleLog("open item line: ", text);
+                return
+            } else if (ft == "qf") {
+                const line = await fn.line(denops, '.');
+                const qflist = await fn.getqflist(denops);
+                noteId = qflist[line -1].module as string;
+            }
+            openItemById(noteId);
         },
 
         async winOpen(): Promise<void> {
@@ -123,36 +158,48 @@ export async function main(denops: Denops): Promise<void> {
                                {
                                    context: 'joplin'
                                });
-            await helper.execute(denops, `
-                cclose
-                `);
+                               await helper.execute(denops, `
+                                                    cclose
+                                                    `);
         },
 
         async openNotebook(): Promise<void> {
-            let content = 'JoplinNoteBooks Explorer\n'
+            // 初期化
+            props = [];
+            // TODO: 他で開いていたら，そのバッファで上書きする．
+            const title = 'JoplinNoteBooks Explorer'
 
             const res = await api.folderApi.listAll();
             consoleLog(res);
 
-            for (const item of res) {
-                content += "- " + item.title + ":" + item.id + "\n";
-                if(item.children != undefined) {
-                    for (const child of item.children) {
-                        content += "  - " + child.title + ":" + child.id as string + "\n";
-                    }
-                }
-            }
+            const content = res2Text(res, "  ");
+
+            const sep = "\n\n";
+
+            const str = title + sep + content;
 
             await denops.cmd("new");
-            await denops.call("setline", 1, content.split(/\r?\n/g))
+            await denops.call("setline", 1, str.split(/\r?\n/g))
+
+            const bufnr = await fn.bufnr(denops, '%');
+            for(let i = 0; i < props.length; i++) {
+                await helper.execute(denops, `
+                                     let s:namespace = nvim_create_namespace('joplin')
+                                     call nvim_buf_set_extmark(${bufnr}, s:namespace, ${i + sep.length}, 0, {})
+                                     if g:joplin_debug
+                                         call nvim_buf_set_virtual_text(${bufnr}, s:namespace, ${i + sep.length}, [['${props[i]['title'] as string + ', ' + props[i]['id'] as string}', 'Comment']],{})
+                                     endif
+                                     `);
+            }
+
             await helper.execute(denops, `
-                setlocal bufhidden=unload nobuflisted
-                setlocal modifiable
-                setlocal nobackup noswapfile
-                setlocal filetype=joplin
-                setlocal buftype=nofile
-                setlocal nowrap cursorline
-                `);
+                                 setlocal bufhidden=unload nobuflisted
+                                 setlocal nomodifiable
+                                 setlocal nobackup noswapfile
+                                 setlocal filetype=joplin
+                                 setlocal buftype=nofile
+                                 setlocal nowrap cursorline
+                                 `);
         },
 
         async search(text: unknown): Promise<void> {
@@ -173,21 +220,24 @@ export async function main(denops: Denops): Promise<void> {
             consoleLog(res);
 
             await helper.execute(denops, `
-                setlocal nomodified
-                `);
+                                 setlocal nomodified
+                                 `);
         },
 
         async newTodo(title: unknown, parent_id: unknown = ''): Promise<void> {
-            ensureString(title);
-            ensureString(parent_id);
+            unknownutil.ensureString(title);
+            unknownutil.ensureString(parent_id);
+
+            if (parent_id.length == 0) {
+            }
 
             const res = await createItem(title as string, parent_id as string, true);
             openItemById(res.id as string);
         },
 
         async newNote(title: unknown, parent_id: unknown = ''): Promise<void> {
-            ensureString(title);
-            ensureString(parent_id);
+            unknownutil.ensureString(title);
+            unknownutil.ensureString(parent_id);
 
             const res = await createItem(title as string, parent_id as string, false);
             openItemById(res.id as string);
@@ -222,11 +272,14 @@ export async function main(denops: Denops): Promise<void> {
 
     const opener = await vars.g.get(denops, "joplin_opener", "") as string
 
+    let props: IProp[];
+
     await helper.execute(
         denops, `
         augroup joplin
-            autocmd!
-            autocmd FileType qf call denops#request('${denops.name}', 'registerKeymap', [])
+        autocmd!
+        autocmd FileType qf call denops#request('${denops.name}', 'registerKeymap', [])
+        autocmd FileType joplin call denops#request('${denops.name}', 'registerKeymap', [])
         augroup END
         `
     );
