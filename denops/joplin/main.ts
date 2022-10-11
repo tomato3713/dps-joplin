@@ -14,8 +14,14 @@ interface KeyMap {
     [name: string]: string[];
 }
 
-interface IProp {
-    [name: string]: string | boolean;
+type ItemTree = Pick<
+    japi.FolderProperties,
+    'id' | 'parent_id' | 'title'
+> & Pick<
+    japi.NoteProperties,
+    'is_todo'
+> & {
+    children?: ItemTree[]
 }
 
 export async function main(denops: Denops): Promise<void> {
@@ -23,6 +29,8 @@ export async function main(denops: Denops): Promise<void> {
     const consoleLog = (...data: unknown[]): void => {
         debug && console.log(...data);
     };
+
+    const namespace: number = await denops.call('nvim_create_namespace', 'joplin') as number;
 
     const createItem = async (title: string, parent_id: string, is_todo: boolean): Promise<unknown> => {
         const res = await api.noteApi.create({
@@ -34,6 +42,25 @@ export async function main(denops: Denops): Promise<void> {
 
         consoleLog(res);
         return res;
+    };
+
+    const _addExtMark = async (tree: ItemTree, bufnr: number, line: number): Promise<number> => {
+            await denops.call("nvim_buf_set_extmark", bufnr, namespace, line, 0, { virt_text: [[tree.id]] });
+            if(debug) {
+//                 await denops.call(
+//                     "nvim_buf_set_virtual_text", 
+//                     bufnr,
+//                     namespace,
+//                     line,
+//                     [[tree.title as string, 'Comment']],
+//                     {});
+            }
+
+        for(const item of tree.children ?? []) {
+            line = await _addExtMark(item, bufnr, ++line);
+        }
+
+        return line;
     };
 
     const openItemById = async (noteId: string): Promise<void> => {
@@ -69,20 +96,12 @@ export async function main(denops: Denops): Promise<void> {
                             });
     };
 
-    const res2Text = (res: Array<any>, indent: string): string => {
-        if( res == undefined ) return "";
-
+    const res2Text = (tree: ItemTree, indent: string): string => {
         let str = "";
-        for(const item of res) {
-            const prop = {
-                [ "title" ]: item.title,
-                [ "id" ]: item.id,
-                [ "is_notebook" ]: true,
-                [ "is_todo" ]: false,
-            };
-            props.push(prop);
-            str += indent + item.title + "\n";
-            str += res2Text(item.children, indent + "  ");
+        str += indent + "+ /" + tree.title + "\n";
+
+        for(const item of tree.children ?? []) {
+            str += res2Text(item, indent + "  ");
         }
 
         return str;
@@ -164,42 +183,37 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async openNotebook(): Promise<void> {
-            // 初期化
-            props = [];
-            // TODO: 他で開いていたら，そのバッファで上書きする．
-            const title = 'JoplinNoteBooks Explorer'
+            const bufnr = await fn.bufadd(denops, "Joplin: NoteBooks");
+            await denops.cmd(`buffer ${bufnr}`);
+            await denops.cmd('setlocal modifiable nobuflisted');
+            await denops.cmd('setlocal nobackup noswapfile');
+            await denops.cmd('setlocal filetype=joplin buftype=nofile');
 
-            const res = await api.folderApi.listAll();
-            consoleLog(res);
-
-            const content = res2Text(res, "  ");
-
-            const sep = "\n\n";
-
-            const str = title + sep + content;
-
-            await denops.cmd("new");
-            await denops.call("setline", 1, str.split(/\r?\n/g))
-
-            const bufnr = await fn.bufnr(denops, '%');
-            for(let i = 0; i < props.length; i++) {
-                await helper.execute(denops, `
-                                     let s:namespace = nvim_create_namespace('joplin')
-                                     call nvim_buf_set_extmark(${bufnr}, s:namespace, ${i + sep.length}, 0, {})
-                                     if g:joplin_debug
-                                         call nvim_buf_set_virtual_text(${bufnr}, s:namespace, ${i + sep.length}, [['${props[i]['title'] as string + ', ' + props[i]['id'] as string}', 'Comment']],{})
-                                     endif
-                                     `);
+            if (itemTree == undefined) {
+                consoleLog('init item tree');
+                const items = await api.folderApi.listAll();
+                if (items != undefined) {
+                    itemTree = {
+                        id: '',
+                        parent_id: '',
+                        title: '',
+                        is_todo: false,
+                        children: items as ItemTree[],
+                    };
+                }
+                consoleLog(itemTree);
             }
 
-            await helper.execute(denops, `
-                                 setlocal bufhidden=unload nobuflisted
-                                 setlocal nomodifiable
-                                 setlocal nobackup noswapfile
-                                 setlocal filetype=joplin
-                                 setlocal buftype=nofile
-                                 setlocal nowrap cursorline
-                                 `);
+            // clear buffer lines and extmark
+            await denops.call("deletebufline", "%", 1, "$");
+            await denops.call("nvim_buf_clear_namespace", bufnr, namespace, 0, -1);
+
+            const content = res2Text(itemTree, "");
+            await denops.call("setline", 1, content.split(/\r?\n/g))
+
+            _addExtMark(itemTree, bufnr, 0);
+
+            await denops.cmd('setlocal nomodifiable');
         },
 
         async search(text: unknown): Promise<void> {
@@ -269,10 +283,9 @@ export async function main(denops: Denops): Promise<void> {
         console.log('no valid joplin app token. fix g:joplin_token');
         return;
     }
-
     const opener = await vars.g.get(denops, "joplin_opener", "") as string
 
-    let props: IProp[];
+    let itemTree: ItemTree;
 
     await helper.execute(
         denops, `
