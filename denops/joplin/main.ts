@@ -62,21 +62,34 @@ export async function main(denops: Denops): Promise<void> {
         return line;
     };
 
-    const _findItemId = (tree: ItemTree, nr: number): [ItemTree | undefined, number] => {
-        if ( nr == 0 ) {
-            return [tree, nr];
+    const _findFolderWithId = (folder: ItemTree, id: string): ItemTree | undefined => {
+        if ( folder.id == id ) {
+            return folder;
+        }
+
+        for(const e of folder.children ?? []) {
+            const ret = _findFolderWithId(e, id);
+            if (ret.id == id) return ret;
+        }
+
+        return undefined;
+    };
+
+    const _findItemIdWithCount = (tree: ItemTree, count: number): [ItemTree | undefined, number] => {
+        if ( count == 0 ) {
+            return [tree, count];
         }
         
 
         for(const item of tree.children ?? []) {
-            const ret = _findItemId(item, --nr);
-            nr = ret[1]
-            if( nr == 0 ) {
+            const ret = _findItemIdWithCount(item, --count);
+            count = ret[1]
+            if( count == 0 ) {
                 return ret;
             }
         }
 
-        return [tree, nr];
+        return [tree, count];
     };
     
     const openNotebook = async (itemTree: ItemTree): Promise<void> => {
@@ -85,21 +98,6 @@ export async function main(denops: Denops): Promise<void> {
             await denops.cmd('setlocal modifiable nobuflisted');
             await denops.cmd('setlocal nobackup noswapfile');
             await denops.cmd('setlocal filetype=joplin buftype=nofile');
-
-            if (itemTree == undefined) {
-                consoleLog('init item tree');
-                const items = await api.folderApi.listAll();
-                if (items != undefined) {
-                    itemTree = {
-                        id: '',
-                        parent_id: '',
-                        title: '',
-                        is_todo: false,
-                        children: items as ItemTree[],
-                    };
-                }
-                consoleLog(itemTree);
-            }
 
             // clear buffer lines and extmark
             await denops.call("deletebufline", "%", 1, "$");
@@ -111,6 +109,8 @@ export async function main(denops: Denops): Promise<void> {
             _addExtMark(itemTree, bufnr, 0);
 
             await denops.cmd('setlocal nomodifiable');
+
+            consoleLog("render item tree: \n", itemTree);
     };
 
     const openItemById = async (noteId: string): Promise<void> => {
@@ -198,7 +198,7 @@ export async function main(denops: Denops): Promise<void> {
 
         async openItemFromFiler(): Promise<void> {
             const nr = await fn.line(denops, '.');
-            const [item, retnr] = _findItemId(itemTree, nr - 1);
+            const [item, retnr] = _findItemIdWithCount(itemTree, nr - 1);
             consoleLog("selected line number: ", nr, retnr, item);
             if(item != undefined && item.type_ == japi.TypeEnum.Note) {
                 openItemById(item.id);
@@ -266,31 +266,51 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async collapseNotebook(): Promise<void> {
+            const allFolder = await api.folderApi.listAll();
+            const folder = _findFolderWithId(allFolder, itemTree.parent_id);
+            consoleLog(folder);
+            const notes = await api.folderApi.notesByFolderId(itemTree.parent_id, [
+                'id',
+                'parent_id',
+                'title',
+                'is_todo',
+                'body',
+            ]);
+            for (const note of notes) {
+                note.type_ = japi.TypeEnum.Note;
+            }
+
+            if (folder.children != undefined) {
+                folder.children.concat(notes);
+            } else {
+                folder.children = notes;
+            }
+
+            itemTree = folder;
+            openNotebook(itemTree);
         },
 
         async expandNotebook(): Promise<void> {
             const nr = await fn.line(denops, '.');
-            const [item, retnr] = _findItemId(itemTree, nr - 1);
+            const [item, retnr] = _findItemIdWithCount(itemTree, nr - 1);
             consoleLog("selected line number: ", nr, retnr, item);
             if(item != undefined && item.type_ == japi.TypeEnum.Folder) {
-                const items = await api.folderApi.notesByFolderId(item.id, [
+                const notes = await api.folderApi.notesByFolderId(item.id, [
                     'id',
                     'parent_id',
                     'title',
                     'is_todo',
                     'body',
                 ]);
-                for (const item of items) {
+                for (const item of notes) {
                     item.type_ = japi.TypeEnum.Note;
                 }
                 itemTree = item;
                 if(item.children != undefined) {
-                    itemTree.children = item.children.concat(items);
+                    itemTree.children = item.children.concat(notes);
                 } else {
-                    itemTree.children = items;
+                    itemTree.children = notes;
                 }
-
-                consoleLog(itemTree);
 
                 openNotebook(itemTree);
             } else {
