@@ -19,12 +19,18 @@ let g:joplin_opener = "vsplit"
 
 ### `:JoplinWinOpen`
 
-Open the notes list in the QuickFix window. Press Enter to open the note at the current cursor line. 
+Open the notes list in the QuickFix window. Press `Enter` to open the note at the current cursor line. 
 For saving changes, you use `:w` command.
 
 ### `:JoplinWinClose`
 
 Close the quickfix window and delete quickfix list.
+
+### `:JoplinOpenNotebook`
+
+Open the notebook and notes tree in the buffer window. Press `Enter` to open the note at the current cursor line.
+Press `L` or `<Right>` to expand notebook at the current cursor line.
+Press `H` or `<Left>` to collapse notebook at the current cursor line.
 
 ## Options
 
@@ -32,6 +38,6 @@ Close the quickfix window and delete quickfix list.
 " debug on
 let g:joplin_debug = true
 
-" item opener
+" item opener, sorry this option is not work.
 let g:joplin_opener = "vsplit"
 ```

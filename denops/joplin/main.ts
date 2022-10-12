@@ -5,7 +5,6 @@ import {
     batch,
     fn,
     autocmd,
-    bufname,
     japi,
     unknownutil,
 } from "./deps.ts";
@@ -22,7 +21,7 @@ type ItemTree = Pick<
     'is_todo'
 > & {
     children?: ItemTree[]
-}
+} & japi.CommonType
 
 export async function main(denops: Denops): Promise<void> {
     const debug: boolean = await vars.g.get(denops, "joplin_debug", false) as boolean;
@@ -63,6 +62,57 @@ export async function main(denops: Denops): Promise<void> {
         return line;
     };
 
+    const _findItemId = (tree: ItemTree, nr: number): [ItemTree | undefined, number] => {
+        if ( nr == 0 ) {
+            return [tree, nr];
+        }
+        
+
+        for(const item of tree.children ?? []) {
+            const ret = _findItemId(item, --nr);
+            nr = ret[1]
+            if( nr == 0 ) {
+                return ret;
+            }
+        }
+
+        return [tree, nr];
+    };
+    
+    const openNotebook = async (itemTree: ItemTree): Promise<void> => {
+            const bufnr = await fn.bufadd(denops, "Joplin: NoteBooks");
+            await denops.cmd(`buffer ${bufnr}`);
+            await denops.cmd('setlocal modifiable nobuflisted');
+            await denops.cmd('setlocal nobackup noswapfile');
+            await denops.cmd('setlocal filetype=joplin buftype=nofile');
+
+            if (itemTree == undefined) {
+                consoleLog('init item tree');
+                const items = await api.folderApi.listAll();
+                if (items != undefined) {
+                    itemTree = {
+                        id: '',
+                        parent_id: '',
+                        title: '',
+                        is_todo: false,
+                        children: items as ItemTree[],
+                    };
+                }
+                consoleLog(itemTree);
+            }
+
+            // clear buffer lines and extmark
+            await denops.call("deletebufline", "%", 1, "$");
+            await denops.call("nvim_buf_clear_namespace", bufnr, namespace, 0, -1);
+
+            const content = res2Text(itemTree, "");
+            await denops.call("setline", 1, content.split(/\r?\n/g))
+
+            _addExtMark(itemTree, bufnr, 0);
+
+            await denops.cmd('setlocal nomodifiable');
+    };
+
     const openItemById = async (noteId: string): Promise<void> => {
         const noteRes: japi.NoteGetRes = await api.noteApi.get(noteId, [
             'id',
@@ -72,7 +122,7 @@ export async function main(denops: Denops): Promise<void> {
         ]);
         consoleLog(noteRes);
 
-        await denops.cmd(opener || `new ${noteRes.title}`);
+        await denops.cmd(`new ${noteRes.title}`);
         await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
 
         await vars.b.set(denops, "joplin_note_id", noteRes.id);
@@ -107,39 +157,54 @@ export async function main(denops: Denops): Promise<void> {
         return str;
     };
 
+    const registerKeymap = async (keymap: KeyMap): Promise<void> => {
+        for (const action in keymap) {
+            const keys = keymap[action];
+            for (const key of keys) {
+                await helper.execute(
+                    denops,
+                    `nnoremap <silent> <buffer> ${key} :call denops#request('${denops.name}', '${action}', [])<CR>`
+                );
+                consoleLog(`registered nnoremap, key: ${key}, action: ${action}`);
+            }
+        }
+    };
+
+
   // API
     denops.dispatcher = {
-        async registerKeymap() {
+        async registerQfKeymap(): Promise<void> {
             const keymap: KeyMap = {};
-            keymap['openItem'] = ['<CR>', '<2-LeftMouse>'];
-            for (const action in keymap) {
-                const keys = keymap[action];
-                for (const key of keys) {
-                    await helper.execute(
-                        denops,
-                        `nnoremap <silent> <buffer> ${key} :call denops#request('${denops.name}', '${action}', [])<CR>`
-                    );
-                    consoleLog(`registered nnoremap, key: ${key}, action: ${action}`);
-                }
-            }
+            keymap['openItemFromQF'] = ['<CR>', '<2-LeftMouse>'];
+            await registerKeymap(keymap);
         },
 
-        async openItem(): Promise<void> {
-            const ft = await vars.localOptions.get(denops, "filetype")
+        async registerFilerKeymap(): Promise<void> {
+            const keymap: KeyMap = {};
+            keymap['openItemFromFiler'] = ['<CR>', '<2-LeftMouse>'];
+            keymap['expandNotebook'] = ['<Right>', 'l'];
+            keymap['collapseNotebook'] = ['<Left>', 'h'];
+            await registerKeymap(keymap);
+        },
 
-            consoleLog(ft as string);
-
+        async openItemFromQF(): Promise<void> {
             let noteId = ""
-            if(ft == "joplin") {
-                const text = await fn.getline(denops, '.');
-                consoleLog("open item line: ", text);
-                return
-            } else if (ft == "qf") {
-                const line = await fn.line(denops, '.');
-                const qflist = await fn.getqflist(denops);
-                noteId = qflist[line -1].module as string;
-            }
+            const line = await fn.line(denops, '.');
+            const qflist = await fn.getqflist(denops);
+            noteId = qflist[line -1].module as string;
+
             openItemById(noteId);
+        },
+
+        async openItemFromFiler(): Promise<void> {
+            const nr = await fn.line(denops, '.');
+            const [item, retnr] = _findItemId(itemTree, nr - 1);
+            consoleLog("selected line number: ", nr, retnr, item);
+            if(item != undefined && item.type_ == japi.TypeEnum.Note) {
+                openItemById(item.id);
+            } else {
+                consoleLog("failed to find item or not note", item);
+            }
         },
 
         async winOpen(): Promise<void> {
@@ -183,12 +248,6 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async openNotebook(): Promise<void> {
-            const bufnr = await fn.bufadd(denops, "Joplin: NoteBooks");
-            await denops.cmd(`buffer ${bufnr}`);
-            await denops.cmd('setlocal modifiable nobuflisted');
-            await denops.cmd('setlocal nobackup noswapfile');
-            await denops.cmd('setlocal filetype=joplin buftype=nofile');
-
             if (itemTree == undefined) {
                 consoleLog('init item tree');
                 const items = await api.folderApi.listAll();
@@ -203,17 +262,40 @@ export async function main(denops: Denops): Promise<void> {
                 }
                 consoleLog(itemTree);
             }
+            await openNotebook(itemTree);
+        },
 
-            // clear buffer lines and extmark
-            await denops.call("deletebufline", "%", 1, "$");
-            await denops.call("nvim_buf_clear_namespace", bufnr, namespace, 0, -1);
+        async collapseNotebook(): Promise<void> {
+        },
 
-            const content = res2Text(itemTree, "");
-            await denops.call("setline", 1, content.split(/\r?\n/g))
+        async expandNotebook(): Promise<void> {
+            const nr = await fn.line(denops, '.');
+            const [item, retnr] = _findItemId(itemTree, nr - 1);
+            consoleLog("selected line number: ", nr, retnr, item);
+            if(item != undefined && item.type_ == japi.TypeEnum.Folder) {
+                const items = await api.folderApi.notesByFolderId(item.id, [
+                    'id',
+                    'parent_id',
+                    'title',
+                    'is_todo',
+                    'body',
+                ]);
+                for (const item of items) {
+                    item.type_ = japi.TypeEnum.Note;
+                }
+                itemTree = item;
+                if(item.children != undefined) {
+                    itemTree.children = item.children.concat(items);
+                } else {
+                    itemTree.children = items;
+                }
 
-            _addExtMark(itemTree, bufnr, 0);
+                consoleLog(itemTree);
 
-            await denops.cmd('setlocal nomodifiable');
+                openNotebook(itemTree);
+            } else {
+                consoleLog("failed to find item or not folder.", item);
+            }
         },
 
         async search(text: unknown): Promise<void> {
@@ -283,6 +365,7 @@ export async function main(denops: Denops): Promise<void> {
         console.log('no valid joplin app token. fix g:joplin_token');
         return;
     }
+
     const opener = await vars.g.get(denops, "joplin_opener", "") as string
 
     let itemTree: ItemTree;
@@ -291,8 +374,8 @@ export async function main(denops: Denops): Promise<void> {
         denops, `
         augroup joplin
         autocmd!
-        autocmd FileType qf call denops#request('${denops.name}', 'registerKeymap', [])
-        autocmd FileType joplin call denops#request('${denops.name}', 'registerKeymap', [])
+        autocmd FileType qf call denops#request('${denops.name}', 'registerQfKeymap', [])
+        autocmd FileType joplin call denops#request('${denops.name}', 'registerFilerKeymap', [])
         augroup END
         `
     );
