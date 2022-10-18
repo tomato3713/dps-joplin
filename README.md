@@ -32,6 +32,22 @@ Open the notebook and notes tree in the buffer window. Press `Enter` to open the
 Press `L` or `<Right>` to expand notebook at the current cursor line.
 Press `H` or `<Left>` to collapse notebook at the current cursor line.
 
+*under construction commands!*
+
+### `:JoplinNewTodo`
+
+partially implemented.
+a new item is created in the notebook opened in the Joplin application.
+
+### `:JoplinNewNote`
+
+partially implemented.
+a new item is created in the notebook opened in the Joplin application.
+
+### `:JoplinSearch <word>`
+
+not implemented.
+
 ## Options
 
 ```
