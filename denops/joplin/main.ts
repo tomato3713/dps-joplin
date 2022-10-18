@@ -294,6 +294,16 @@ export async function main(denops: Denops): Promise<void> {
             const nr = await fn.line(denops, '.');
             const [item, retnr] = _findItemIdWithCount(itemTree, nr - 1);
             consoleLog("selected line number: ", nr, retnr, item);
+
+            // do nothing if selected current notebook folder 
+            if(item.id === itemTree.id) {
+                return;
+            }
+            // do nothing if selected blank line
+            if(retnr != 0) {
+                return;
+            }
+
             if(item != undefined && item.type_ == japi.TypeEnum.Folder) {
                 const notes = await api.folderApi.notesByFolderId(item.id, [
                     'id',
@@ -305,7 +315,7 @@ export async function main(denops: Denops): Promise<void> {
                 for (const item of notes) {
                     item.type_ = japi.TypeEnum.Note;
                 }
-                itemTree = item;
+                itemTree = { ...item };
                 if(item.children != undefined) {
                     itemTree.children = item.children.concat(notes);
                 } else {
