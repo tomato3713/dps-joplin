@@ -200,7 +200,7 @@ export async function main(denops: Denops): Promise<void> {
 
         async openItemFromFiler(): Promise<void> {
             const nr = await fn.line(denops, '.');
-            const [item, retnr] = { ..._findItemIdWithCount(itemTree, nr - 1) };
+            const [item, retnr] = _findItemIdWithCount(itemTree, nr - 1);
             consoleLog("selected line number: ", nr, retnr, item);
             if(item != undefined && item.type_ == japi.TypeEnum.Note) {
                 openItemById(item.id);
