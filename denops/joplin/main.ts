@@ -58,13 +58,11 @@ export async function main(denops: Denops): Promise<void> {
         for(const item of tree.children ?? []) {
             line = await _addExtMark(item, bufnr, ++line);
         }
-
         return line;
     };
 
     const _findFolderWithId = (folder: ItemTree, id: string): ItemTree | undefined => {
-        consoleLog(folder.id, id);
-        consoleLog('child', folder.children);
+        consoleLog(`called _findFolderWithId func, target id: '${id}'`);
         if ( folder.id === id ) {
             return folder;
         }
@@ -78,6 +76,7 @@ export async function main(denops: Denops): Promise<void> {
     };
 
     const _findItemIdWithCount = (tree: ItemTree, count: number): [ItemTree | undefined, number] => {
+        consoleLog('called _findItemIdWithCount func', count);
         if ( count == 0 ) {
             return [tree, count];
         }
@@ -95,34 +94,34 @@ export async function main(denops: Denops): Promise<void> {
     };
     
     const openNotebook = async (itemTree: ItemTree): Promise<void> => {
-            const bufnr = await fn.bufadd(denops, "Joplin: NoteBooks");
-            await denops.cmd(`buffer ${bufnr}`);
-            await denops.cmd('setlocal modifiable nobuflisted');
-            await denops.cmd('setlocal nobackup noswapfile');
-            await denops.cmd('setlocal filetype=joplin buftype=nofile');
+        consoleLog('called openNotebook func');
+        const bufnr = await fn.bufadd(denops, "Joplin: NoteBooks");
+        await denops.cmd(`buffer ${bufnr}`);
+        await denops.cmd('setlocal modifiable nobuflisted');
+        await denops.cmd('setlocal nobackup noswapfile');
+        await denops.cmd('setlocal filetype=joplin buftype=nofile');
 
-            // clear buffer lines and extmark
-            await denops.call("deletebufline", "%", 1, "$");
-            await denops.call("nvim_buf_clear_namespace", bufnr, namespace, 0, -1);
+        // clear buffer lines and extmark
+        await denops.call("deletebufline", "%", 1, "$");
+        await denops.call("nvim_buf_clear_namespace", bufnr, namespace, 0, -1);
 
-            const content = res2Text(itemTree, "");
-            await denops.call("setline", 1, content.split(/\r?\n/g))
+        consoleLog(itemTree);
+        const content = res2Text(itemTree, "");
+        await denops.call("setline", 1, content.split(/\r?\n/g))
 
-            _addExtMark(itemTree, bufnr, 0);
+//         _addExtMark(itemTree, bufnr, 0);
 
-            await denops.cmd('setlocal nomodifiable');
-
-            consoleLog("render item tree: \n", itemTree);
+        await denops.cmd('setlocal nomodifiable');
     };
 
     const openItemById = async (noteId: string): Promise<void> => {
+        consoleLog('called openItemById func');
         const noteRes: japi.NoteGetRes = await api.noteApi.get(noteId, [
             'id',
             'title',
             'body',
             'parent_id',
         ]);
-        consoleLog(noteRes);
 
         await denops.cmd(`new ${noteRes.title}`);
         await denops.call("setline", 1, noteRes.body.split(/\r?\n/));
@@ -150,7 +149,21 @@ export async function main(denops: Denops): Promise<void> {
 
     const res2Text = (tree: ItemTree, indent: string): string => {
         let str = "";
-        str += indent + "+ /" + tree.title + "\n";
+        switch (tree.type_) {
+            case japi.TypeEnum.Folder:
+                str += indent + "+ /" + tree.title + "\n";
+                break;
+            case japi.TypeEnum.Note:
+                if (tree._isTodo) {
+                    str += indent + "- [ ] /" + tree.title + "\n";
+                } else {
+                    str += indent + "- /" + tree.title + "\n";
+                }
+                break;
+            default:
+                str += "Joplin notebook tree root\n"
+                break;
+        }
 
         for(const item of tree.children ?? []) {
             str += res2Text(item, indent + "  ");
@@ -160,6 +173,7 @@ export async function main(denops: Denops): Promise<void> {
     };
 
     const registerKeymap = async (keymap: KeyMap): Promise<void> => {
+        consoleLog('called registerKeymap func');
         for (const action in keymap) {
             const keys = keymap[action];
             for (const key of keys) {
@@ -262,12 +276,13 @@ export async function main(denops: Denops): Promise<void> {
                         children: items as ItemTree[],
                     };
                 }
-                consoleLog(itemTree);
+//                 consoleLog(itemTree);
             }
             await openNotebook(itemTree);
         },
 
         async collapseNotebook(): Promise<void> {
+            consoleLog('called collapseNotebook func');
             const allFolder = {
                 id: '',
                 parent_id: '',
@@ -290,9 +305,12 @@ export async function main(denops: Denops): Promise<void> {
                     note.type_ = japi.TypeEnum.Note;
                 }
             }
+            consoleLog(notes);
 
             if (folder.children != undefined) {
-                folder.children.concat(notes);
+                if(notes != undefined) {
+                    folder.children = folder.children.concat(notes);
+                }
             } else {
                 folder.children = notes;
             }
@@ -302,6 +320,7 @@ export async function main(denops: Denops): Promise<void> {
         },
 
         async expandNotebook(): Promise<void> {
+            consoleLog('called expandNotebook func');
             const nr = await fn.line(denops, '.');
             const [item, retnr] = _findItemIdWithCount(itemTree, nr - 1);
             consoleLog("selected line number: ", nr, retnr, item);
@@ -328,7 +347,9 @@ export async function main(denops: Denops): Promise<void> {
                 }
                 itemTree = { ...item };
                 if(item.children != undefined) {
-                    itemTree.children = item.children.concat(notes);
+                    if(notes != undefined) {
+                        itemTree.children = item.children.concat(notes);
+                    }
                 } else {
                     itemTree.children = notes;
                 }
